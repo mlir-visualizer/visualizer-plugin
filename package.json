@@ -1,5 +1,5 @@
 {
-  "name": "mlir-visualizer",
+	"name": "mlir-visualizer",
 	"displayName": "mlir-visualizer",
 	"description": "A visualizer for MLIR compiler optimizations",
 	"version": "0.0.1",
@@ -10,14 +10,14 @@
 		"Other"
 	],
 	"activationEvents": [
-        "onCommand:mlir-visualizer.helloWorld"
+		"onCommand:mlir-visualizer.visualize"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
 		"commands": [
 			{
-				"command": "mlir-visualizer.helloWorld",
-				"title": "Hello World"
+				"command": "mlir-visualizer.visualize",
+				"title": "Visualize MLIR Optimizations"
 			}
 		]
 	},
