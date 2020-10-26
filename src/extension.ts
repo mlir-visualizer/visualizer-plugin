@@ -1,6 +1,8 @@
-import * as vscode from 'vscode';
 import axios from 'axios';
+import * as fs from 'fs-extra';
 import * as os from 'os';
+import * as path from 'path';
+import * as vscode from 'vscode';
 
 async function downloadVersion(context: vscode.ExtensionContext, version: any) {
 	return new Promise(async resolve => {
@@ -28,25 +30,34 @@ async function downloadVersion(context: vscode.ExtensionContext, version: any) {
 			let promise: Promise<null> = new Promise(async (resolve) => {
 				// Check if we need to download this asset
 				if (downloads.indexOf(asset.name) != -1) {
-					// TODO(Arm1stice): Remove the old version
+					// Remove the old version
+					let filePath = path.join(context.globalStorageUri.fsPath, asset.name);
+					await fs.remove(filePath)
 
+					// Download the new version using a progress bar
 					await vscode.window.withProgress(
 						{
 							location: vscode.ProgressLocation.Notification,
 							title: `Downloading "${asset.name}"`
 						},
-						async (p) => {
-							const { data, headers } = await axios({
-								url: asset.url,
-								method: 'GET',
-								responseType: 'stream',
-							});
-
-							// TODO(Arm1stice): Write to the file
-
-							data.on('close', () => {
-								p.report({ increment: 100 })
-							});
+						(p) => {
+							return new Promise(async (resolve) => {
+								// Start the download stream
+								const { data, headers } = await axios({
+									url: asset.browser_download_url,
+									method: 'GET',
+									responseType: 'stream',
+								});
+	
+								// Pipe to file stream
+								let stream = fs.createWriteStream(filePath)
+								data.pipe(stream)
+								data.on('close', () => {
+									p.report({ increment: 100 })
+									stream.close()
+									resolve()
+								});
+							})
 						});
 					return resolve();
 				} else {
@@ -58,7 +69,6 @@ async function downloadVersion(context: vscode.ExtensionContext, version: any) {
 		});
 
 		await Promise.all(promises);
-		context.globalState.update('tfopt-version', version)
 		return resolve();
 	});
 }
@@ -81,19 +91,24 @@ async function getLatestVersion() {
 // Check if the tf-opt tool is already downloaded
 async function checkTfOpt(context: vscode.ExtensionContext) {
 	return new Promise(async (resolve) => {
-		let currentVersion: Date | undefined = context.globalState.get("tfopt-version");
-		let latestVersion: any = await getLatestVersion();
+		// Get current version information from the global state
+		let currentVersion: number | undefined = context.globalState.get("tfopt-version");
+		let currentVersionDate = new Date(<number>currentVersion);
 
+		
+		let latestVersion: any = await getLatestVersion();
 		// If we failed to get the latest version, just return silently
 		if (latestVersion == null) {
 			return resolve(null)
 		}
-
 		let latestPublishDate = new Date(latestVersion.published_at);
-		if (!currentVersion || latestPublishDate.getTime() > currentVersion.getTime()) {
+
+		if (!currentVersion || latestPublishDate.getTime() > currentVersionDate.getTime()) {
+			// Download the newest version if necessary
 			downloadVersion(context, latestVersion)
 				.then(() => {
 					console.log(`Updated tf-opt to version ${latestPublishDate}`)
+					context.globalState.update('tfopt-version', latestPublishDate.getTime())
 					return resolve(null);
 				})
 				.catch((err: Error) => {
@@ -107,16 +122,24 @@ async function checkTfOpt(context: vscode.ExtensionContext) {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	let visualizer = vscode.commands.registerCommand('mlir-visualizer.visualize', () => {
-		checkTfOpt(context).then(() => {
-			vscode.window.showInformationMessage('Hello World from mlir-visualizer!');
-			vscode.window.showInformationMessage('' + context.globalStorageUri);
+	let visualizer = vscode.commands.registerCommand('mlir-visualizer.visualize', async () => {
+		// Check if there is an active text editor and if it is an MLIR file
+		if (!vscode.window.activeTextEditor || path.extname(vscode.window.activeTextEditor?.document.fileName) != '.mlir') {
+			vscode.window.showErrorMessage("Command must be run on an MLIR file")
+			return
+		}
 
+		// Check if our storage path exists, create it if it doesn't
+		if (!await fs.pathExists(context.globalStorageUri.fsPath)) {
+			await fs.mkdir(context.globalStorageUri.fsPath)
+		}
+
+		checkTfOpt(context).then(() => {
 			const panel = vscode.window.createWebviewPanel(
 				'opt-visualizer', // Identifies the type of the webview. Used internally
 				'MLIR Visualizer', // Title of the panel displayed to the user
 				vscode.ViewColumn.Beside, // Editor column to show the new webview panel in.
-				{} // Webview options. More on these later.
+				{}
 			);
 
 			// TODO(Arm1stice): Set the webview to the webpage showing that the optimization is in progress
