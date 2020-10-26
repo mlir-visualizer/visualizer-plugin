@@ -142,7 +142,15 @@ export function activate(context: vscode.ExtensionContext) {
 				{}
 			);
 
-			// TODO(Arm1stice): Set the webview to the webpage showing that the optimization is in progress
+			// Show that optimization is in progress
+			panel.webview.html = `
+			<html>
+				<body>
+					Optimization in progress...
+				</body>
+			</html>
+			`
+			
 			// TODO(Arm1stice): Perform the optimizations in order and store them in the workspace context
 			// TODO(Arm1stice): Render the webview that shows the optimizations
 		})
