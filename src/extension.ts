@@ -1,7 +1,9 @@
 import axios from 'axios';
+import * as child_process from 'child_process';
 import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
+import * as tmp from 'tmp';
 import * as vscode from 'vscode';
 
 async function downloadVersion(context: vscode.ExtensionContext, version: any) {
@@ -11,15 +13,14 @@ async function downloadVersion(context: vscode.ExtensionContext, version: any) {
 		let downloads: string[] = [];
 		switch (system) {
 			case "Darwin": {
-				// TODO(Arm1stice): Support Darwin tf-opt
+				// TODO: Support Darwin tf-opt
 			}
 			case "Linux": {
-				downloads.push('libtensorflow_framework.so.2')
 				downloads.push('tf-opt-linux')
 				break
 			}
 			case "Windows_NT": {
-				// TODO(Arm1stice): Support Windows tf-opt
+				// TODO: Support Windows tf-opt
 			}
 		}
 
@@ -48,14 +49,15 @@ async function downloadVersion(context: vscode.ExtensionContext, version: any) {
 									method: 'GET',
 									responseType: 'stream',
 								});
-	
+
 								// Pipe to file stream
 								let stream = fs.createWriteStream(filePath)
 								data.pipe(stream)
 								data.on('close', () => {
 									p.report({ increment: 100 })
 									stream.close()
-									resolve()
+									// Set the file as executable
+									fs.chmod(filePath, 0o777).then(resolve);
 								});
 							})
 						});
@@ -89,17 +91,19 @@ async function getLatestVersion() {
 }
 
 // Check if the tf-opt tool is already downloaded
-async function checkTfOpt(context: vscode.ExtensionContext) {
+async function checkTfOpt(context: vscode.ExtensionContext): Promise<string> {
 	return new Promise(async (resolve) => {
 		// Get current version information from the global state
 		let currentVersion: number | undefined = context.globalState.get("tfopt-version");
 		let currentVersionDate = new Date(<number>currentVersion);
 
-		
+		// TODO: Set the binary path based on operating system
+		let binaryPath = path.join(context.globalStorageUri.fsPath, "tf-opt-linux");
+
 		let latestVersion: any = await getLatestVersion();
 		// If we failed to get the latest version, just return silently
 		if (latestVersion == null) {
-			return resolve(null)
+			return resolve(binaryPath)
 		}
 		let latestPublishDate = new Date(latestVersion.published_at);
 
@@ -109,15 +113,56 @@ async function checkTfOpt(context: vscode.ExtensionContext) {
 				.then(() => {
 					console.log(`Updated tf-opt to version ${latestPublishDate}`)
 					context.globalState.update('tfopt-version', latestPublishDate.getTime())
-					return resolve(null);
+					return resolve(binaryPath);
 				})
 				.catch((err: Error) => {
-					return resolve(err);
+					// TODO: Properly handle error
+					return resolve(binaryPath);
 				});
 		} else {
 			console.log(`tf-opt update to date at version ${currentVersion}`)
-			return resolve(null)
+			return resolve(binaryPath);
 		}
+	});
+}
+
+async function runOptimizations(fileText: string, binaryPath: string): Promise<string[]> {
+	return new Promise(async (resolve) => {
+		// A list of all the optimizations we need to run
+		let optimizations = [
+			"tf-switch-fold",
+			"tf-executor-graph-pruning",
+			"tf-executor-island-coarsening",
+			"tf-materialize-passthrough-op",
+			"canonicalize",
+			"tf-shape-inference",
+			"tf-optimize"
+		];
+
+		// Run all the optimizations through tf-opt
+		let allOutput = [];
+		let currentOutput = fileText;
+		for (var i = 0; i < optimizations.length; i++) {
+			let file = tmp.fileSync();
+			fs.writeSync(file.fd, currentOutput);
+			fs.close(file.fd);
+			allOutput.push(currentOutput)
+			currentOutput = await runTfOpt(binaryPath, file.name, optimizations[i]);
+			file.removeCallback();
+		}
+		allOutput.push(currentOutput);
+
+		// Return the original text and all the individual optimizations
+		return resolve(allOutput);
+	});
+}
+
+// Runs the tf-opt binary on some mlir code with 
+async function runTfOpt(binaryPath: string, mlirFilePath: string, optimization: string): Promise<string> {
+	return new Promise(resolve => {
+		// TODO: Handle errors if this fails
+		let stdout = child_process.execFileSync(binaryPath, [mlirFilePath, `--pass-pipeline=${optimization}`]);
+		return resolve(stdout.toString().trim());
 	});
 }
 
@@ -134,7 +179,7 @@ export function activate(context: vscode.ExtensionContext) {
 			await fs.mkdir(context.globalStorageUri.fsPath)
 		}
 
-		checkTfOpt(context).then(() => {
+		checkTfOpt(context).then(async (binaryPath: string) => {
 			const panel = vscode.window.createWebviewPanel(
 				'opt-visualizer', // Identifies the type of the webview. Used internally
 				'MLIR Visualizer', // Title of the panel displayed to the user
@@ -146,13 +191,39 @@ export function activate(context: vscode.ExtensionContext) {
 			panel.webview.html = `
 			<html>
 				<body>
+					<br>
 					Optimization in progress...
 				</body>
 			</html>
 			`
-			
-			// TODO(Arm1stice): Perform the optimizations in order and store them in the workspace context
-			// TODO(Arm1stice): Render the webview that shows the optimizations
+
+			let fileText: string | undefined = vscode.window.activeTextEditor?.document.getText();
+			if (!fileText) {
+				vscode.window.showErrorMessage("Could not get code from the active editor")
+				return
+			}
+			let optimizations = await runOptimizations(fileText, binaryPath);
+			console.log(optimizations);
+
+			let bodyHtml = ``
+			for(var i = 0; i < optimizations.length; i++) {
+				bodyHtml += `
+				<div>
+					<h1>Optimization ${i}</h1>
+					<div>
+${optimizations[i]}
+					</div>
+				</div>
+				`
+			}
+			let finalHtml = `
+				<!DOCTYPE html>
+				<html>
+${bodyHtml}
+				</html>
+			`
+			panel.webview.html = finalHtml;
+			console.log(finalHtml)
 		})
 	});
 
