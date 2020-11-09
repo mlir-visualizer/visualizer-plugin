@@ -184,7 +184,10 @@ export function activate(context: vscode.ExtensionContext) {
 				'opt-visualizer', // Identifies the type of the webview. Used internally
 				'MLIR Visualizer', // Title of the panel displayed to the user
 				vscode.ViewColumn.Beside, // Editor column to show the new webview panel in.
-				{}
+				{
+					// Enable scripts in the webview
+					enableScripts: true
+				}
 			);
 
 			// Show that optimization is in progress
@@ -203,7 +206,6 @@ export function activate(context: vscode.ExtensionContext) {
 				return
 			}
 			let optimizations = await runOptimizations(fileText, binaryPath);
-			console.log(optimizations);
 
 			let bodyHtml = ``
 			for(var i = 0; i < optimizations.length; i++) {
@@ -211,19 +213,31 @@ export function activate(context: vscode.ExtensionContext) {
 				<div>
 					<h1>Optimization ${i}</h1>
 					<div>
+						<pre>
+							<code class="plaintext">
 ${optimizations[i]}
+							</code>
+						</pre>
 					</div>
 				</div>
 				`
 			}
 			let finalHtml = `
-				<!DOCTYPE html>
-				<html>
-${bodyHtml}
-				</html>
-			`
+<!DOCTYPE html>
+<html>
+	<head>
+	<meta
+		http-equiv="Content-Security-Policy"
+		content="default-src 'none'; img-src ${panel.webview.cspSource} https:; script-src ${panel.webview.cspSource} https: 'unsafe-inline'; style-src ${panel.webview.cspSource} https:;"
+  	/>
+	</head>
+	${bodyHtml}
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/styles/atom-one-dark.min.css">
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/highlight.min.js"></script>
+	<script>hljs.initHighlightingOnLoad();</script>
+</html>
+`
 			panel.webview.html = finalHtml;
-			console.log(finalHtml)
 		})
 	});
 
