@@ -249,9 +249,9 @@ export function activate(context: vscode.ExtensionContext) {
 					for (var j = 0; j < optDiff.length; j++) {
 						let part = optDiff[j];
 						if (part.added) {
-							optDiffHtml += `<span style='background-color: green; color: #fff;'>${part.value}</span>`;
+							optDiffHtml += `<span class='diff addition' style='background-color: green;'>${part.value}</span>`;
 						} else if (part.removed) {
-							optDiffHtml += `<span style='background-color: red; color: #fff;'>${part.value}</span>`;
+							optDiffHtml += `<span class='diff removal' style='background-color: red;'>${part.value}</span>`;
 						} else {
 							optDiffHtml += part.value;
 						}
@@ -264,11 +264,11 @@ export function activate(context: vscode.ExtensionContext) {
 				for (var i = 0; i < optimizations.length; i++) {
 					bodyHtml += `
 					<div>
-						<h1>${i == 0 ? `Original Code` : `Optimization ${optimizationNames[i - 1]}`}</h1>
+						<h1>${i == 0 ? `Original Code` : `Optimization ${i}: ${optimizationNames[i - 1]}`}</h1>
 						${i == 0 ? `` : `<button id='hide-${optimizationNames[i - 1]}' onclick="hideDiff('${optimizationNames[i - 1]}')">Hide Diff</button>`}
 						<div id='${optimizationNames[i - 1]}-diff'>
 							<pre>
-								<code class="plaintext">
+								<code class="mlir">
 ${diffedOptimizations[i]}
 								</code>
 							</pre>
@@ -282,7 +282,7 @@ ${diffedOptimizations[i]}
 						<button style='display: none;' id='show-${optimizationNames[i - 1]}' onclick="showDiff('${optimizationNames[i - 1]}')">Show Diff</button>
 						<div style='display: none;' id='${optimizationNames[i - 1]}-original'>
 							<pre>
-								<code class="plaintext">
+								<code class="mlir">
 ${optimizations[i]}
 								</code>
 							</pre>					
@@ -304,10 +304,34 @@ ${optimizations[i]}
 			http-equiv="Content-Security-Policy"
 			content="default-src 'none'; img-src ${panel.webview.cspSource} https:; script-src ${panel.webview.cspSource} https: 'unsafe-inline'; style-src ${panel.webview.cspSource} https: 'unsafe-inline';"
 		  />
+		<style>
+				span.diff span.hljs-keyword,
+				span.diff span.hljs-built_in,
+				span.diff span.hljs-type,
+				span.diff span.hljs-literal,
+				span.diff span.hljs-number,
+				span.diff span.hljs-operator,
+				span.diff span.hljs-punctuation,
+				span.diff span.hljs-regexp,
+				span.diff span.hljs-string,
+				span.diff span.hljs-subst,
+				span.diff span.hljs-symbol,
+				span.diff span.hljs-class,
+				span.diff span.hljs-function,
+				span.diff span.hljs-variable,
+				span.diff span.hljs-title,
+				span.diff span.hljs-params,
+				span.diff span.hljs-comment,
+				span.diff span.hljs-doctag
+				{
+					color: #fff !important;
+				}
+		</style>
 		</head>
 		${bodyHtml}
 		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/styles/codepen-embed.min.css">
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/highlight.min.js"></script>
+		<script src="https://cdn.jsdelivr.net/gh/highlightjs/highlightjs-mlir/dist/mlir.min.js"></script>
 		<script>
 			hljs.initHighlightingOnLoad();
 			function hideDiff(name) {
