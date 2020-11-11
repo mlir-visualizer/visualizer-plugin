@@ -161,8 +161,10 @@ async function runOptimizations(fileText: string, binaryPath: string): Promise<s
 async function runTfOpt(binaryPath: string, mlirFilePath: string, optimization: string): Promise<string> {
 	return new Promise(resolve => {
 		// TODO: Handle errors if this fails
-		let stdout = child_process.execFileSync(binaryPath, [mlirFilePath, `--pass-pipeline=${optimization}`]);
-		return resolve(stdout.toString().trim());
+		child_process.execFile(binaryPath, [mlirFilePath, `--${optimization}`], (err, stdout, stderr) => {
+			if (err) throw err;
+			return resolve(stdout.toString().trim());
+		});
 	});
 }
 
