@@ -269,7 +269,7 @@ export function activate(context: vscode.ExtensionContext) {
 						<div id='${optimizationNames[i - 1]}-diff'>
 							<pre>
 								<code class="plaintext">
-	${diffedOptimizations[i]}
+${diffedOptimizations[i]}
 								</code>
 							</pre>
 						</div>
@@ -283,7 +283,7 @@ export function activate(context: vscode.ExtensionContext) {
 						<div style='display: none;' id='${optimizationNames[i - 1]}-original'>
 							<pre>
 								<code class="plaintext">
-	${optimizations[i]}
+${optimizations[i]}
 								</code>
 							</pre>					
 						</div>
