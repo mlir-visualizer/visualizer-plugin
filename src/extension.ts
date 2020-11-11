@@ -128,7 +128,7 @@ async function checkTfOpt(context: vscode.ExtensionContext): Promise<string> {
 					return resolve(binaryPath);
 				})
 				.catch((err: Error) => {
-					// TODO: Properly handle error
+					vscode.window.showErrorMessage(`Failed to download new version of tf-opt: ${err}`);
 					return resolve(binaryPath);
 				});
 		} else {
@@ -192,7 +192,9 @@ export function activate(context: vscode.ExtensionContext) {
 			await fs.mkdir(context.globalStorageUri.fsPath)
 		}
 
+		// Check for updates for tf-opt
 		checkTfOpt(context).then(async (binaryPath: string) => {
+			// Create the webview panel we will populate with the diffs
 			const panel = vscode.window.createWebviewPanel(
 				'opt-visualizer',
 				// Cast is safe because we check if there is an active editor above
@@ -204,6 +206,7 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 			);
 
+			// Get the text from the current editor
 			let fileText: string | undefined = vscode.window.activeTextEditor?.document.getText();
 			if (!fileText) {
 				vscode.window.showErrorMessage("Could not get code from the active editor")
@@ -220,9 +223,9 @@ export function activate(context: vscode.ExtensionContext) {
 				for (var j = 0; j < optDiff.length; j++) {
 					let part = optDiff[j];
 					if (part.added) {
-						optDiffHtml += `<span style='background-color: green'>${part.value}</span>`;
+						optDiffHtml += `<span style='background-color: green; color: #fff;'>${part.value}</span>`;
 					} else if (part.removed) {
-						optDiffHtml += `<span style='background-color: red'>${part.value}</span>`;
+						optDiffHtml += `<span style='background-color: red; color: #fff;'>${part.value}</span>`;
 					} else {
 						optDiffHtml += part.value;
 					}
@@ -230,21 +233,43 @@ export function activate(context: vscode.ExtensionContext) {
 				diffedOptimizations.push(optDiffHtml)
 			}
 
+			// Create the main body HTML by concatenating the HTML for each optimization section
 			let bodyHtml = ``
 			for (var i = 0; i < optimizations.length; i++) {
 				bodyHtml += `
 				<div>
 					<h1>${i == 0 ? `Original Code` : `Optimization ${optimizationNames[i - 1]}`}</h1>
-					<div>
+					${i == 0 ? `` : `<button id='hide-${optimizationNames[i - 1]}' onclick="hideDiff('${optimizationNames[i - 1]}')">Hide Diff</button>`}
+					<div id='${optimizationNames[i - 1]}-diff'>
 						<pre>
 							<code class="plaintext">
 ${diffedOptimizations[i]}
 							</code>
 						</pre>
 					</div>
+				`
+
+				// If this is not the original code section, create a section for the non-diffed
+				// optimization. This will be hidden by default
+				if (i !== 0) {
+					bodyHtml += `
+					<button style='display: none;' id='show-${optimizationNames[i - 1]}' onclick="showDiff('${optimizationNames[i - 1]}')">Show Diff</button>
+					<div style='display: none;' id='${optimizationNames[i - 1]}-original'>
+						<pre>
+							<code class="plaintext">
+${optimizations[i]}
+							</code>
+						</pre>					
+					</div>
+					`
+				}
+
+				bodyHtml += `
 				</div>
 				`
 			}
+
+			// Use the body HTML that we generated above to create the final HTML we put in the webview
 			let finalHtml = `
 <!DOCTYPE html>
 <html>
@@ -259,11 +284,23 @@ ${diffedOptimizations[i]}
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/highlight.min.js"></script>
 	<script>
 		hljs.initHighlightingOnLoad();
+		function hideDiff(name) {
+			document.getElementById("hide-" + name).style.display = 'none';
+			document.getElementById(name + "-diff").style.display = 'none';
+			document.getElementById("show-" + name).style.display = 'block';
+			document.getElementById(name + "-original").style.display = 'block';
+		}
+		function showDiff(name) {
+			document.getElementById("hide-" + name).style.display = 'block';
+			document.getElementById(name + "-diff").style.display = 'block';
+			document.getElementById("show-" + name).style.display = 'none';
+			document.getElementById(name + "-original").style.display = 'none';
+		}
 	</script>
 </html>
 `
 			panel.webview.html = finalHtml;
-		})
+		});
 	});
 
 	context.subscriptions.push(visualizer);
