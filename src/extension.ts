@@ -7,7 +7,8 @@ import * as path from 'path';
 import * as tmp from 'tmp';
 import * as vscode from 'vscode';
 
-// A list of all the optimizations we need to run
+// These are all of the individual optimizations that are used in the standard
+// optimization pipeline 
 let optimizationNames = [
 	"tf-switch-fold",
 	"tf-executor-graph-pruning",
@@ -18,6 +19,7 @@ let optimizationNames = [
 	"tf-optimize"
 ];
 
+// Downloads the specified version of tf-opt
 async function downloadVersion(context: vscode.ExtensionContext, version: any) {
 	return new Promise(async resolve => {
 		// Determine the correct things to download based on the operating system
@@ -95,6 +97,7 @@ async function getLatestVersion() {
 				resolve(result.data);
 			})
 			.catch(err => {
+				vscode.window.showErrorMessage(`Error occurred while checking for updates: ${err}`);
 				console.error("Error occurred while checking for updates")
 				console.error(err);
 				resolve(null);
@@ -129,6 +132,8 @@ async function checkTfOpt(context: vscode.ExtensionContext): Promise<string> {
 				})
 				.catch((err: Error) => {
 					vscode.window.showErrorMessage(`Failed to download new version of tf-opt: ${err}`);
+					console.error("Failed to download new version of tf-opt")
+					console.error(err);
 					return resolve(binaryPath);
 				});
 		} else {
@@ -139,7 +144,7 @@ async function checkTfOpt(context: vscode.ExtensionContext): Promise<string> {
 }
 
 async function runOptimizations(fileText: string, binaryPath: string, webview: vscode.Webview): Promise<string[]> {
-	return new Promise(async (resolve) => {
+	return new Promise(async (resolve, reject) => {
 		// Run all the optimizations through tf-opt
 		let allOutput = [];
 		let currentOutput = fileText;
@@ -154,13 +159,30 @@ async function runOptimizations(fileText: string, binaryPath: string, webview: v
 			</html>
 			`
 
+			// Create a temporary file and write the output of the previous
+			// optimization stage to it
 			let file = tmp.fileSync();
 			fs.writeSync(file.fd, currentOutput);
 			fs.close(file.fd);
-			allOutput.push(currentOutput)
-			currentOutput = await runTfOpt(binaryPath, file.name, optimizationNames[i]);
-			file.removeCallback();
+
+			// Push the output of the previous optimization to the array
+			allOutput.push(currentOutput);
+
+
+			try {
+				// Run the next optimization on that file
+				currentOutput = await runTfOpt(binaryPath, file.name, optimizationNames[i]);
+
+				// Delete the temporary file
+				file.removeCallback();
+			} catch (err) {
+				// If one of the stages fails, return the error
+				return reject(err);
+			}
+
 		}
+
+		// Push the output of the final optimization to the array
 		allOutput.push(currentOutput);
 
 		// Return the original text and all the individual optimizations
@@ -170,20 +192,24 @@ async function runOptimizations(fileText: string, binaryPath: string, webview: v
 
 // Runs the tf-opt binary on some mlir code with 
 async function runTfOpt(binaryPath: string, mlirFilePath: string, optimization: string): Promise<string> {
-	return new Promise(resolve => {
-		// TODO: Handle errors if this fails
+	return new Promise((resolve, reject) => {
 		child_process.execFile(binaryPath, [mlirFilePath, `--${optimization}`], (err, stdout, stderr) => {
-			if (err) throw err;
+			// If tf-opt returns an error, reject the Promise
+			if (err) {
+				return reject(err);
+			}
+			// Otherwise, convert the stdout buffer to a string and trim it
 			return resolve(stdout.toString().trim());
 		});
 	});
 }
 
+// Called when the extension gets loaded
 export function activate(context: vscode.ExtensionContext) {
 	let visualizer = vscode.commands.registerCommand('mlir-visualizer.visualize', async () => {
 		// Check if there is an active text editor and if it is an MLIR file
 		if (!vscode.window.activeTextEditor || path.extname(vscode.window.activeTextEditor?.document.fileName) != '.mlir') {
-			vscode.window.showErrorMessage("Command must be run on an MLIR file")
+			vscode.window.showErrorMessage("Command must be run while a TF MLIR file is focused")
 			return
 		}
 
@@ -214,92 +240,109 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 
 			// Generate optimizations and diffs
-			let optimizations = await runOptimizations(fileText, binaryPath, panel.webview);
-			let diffedOptimizations = [];
-			diffedOptimizations.push(optimizations[0]);
-			for (var i = 1; i < optimizations.length; i++) {
-				let optDiff = diff.diffWordsWithSpace(optimizations[i - 1], optimizations[i]);
-				let optDiffHtml = '';
-				for (var j = 0; j < optDiff.length; j++) {
-					let part = optDiff[j];
-					if (part.added) {
-						optDiffHtml += `<span style='background-color: green; color: #fff;'>${part.value}</span>`;
-					} else if (part.removed) {
-						optDiffHtml += `<span style='background-color: red; color: #fff;'>${part.value}</span>`;
-					} else {
-						optDiffHtml += part.value;
+			runOptimizations(fileText, binaryPath, panel.webview).then(optimizations => {
+				let diffedOptimizations = [];
+				diffedOptimizations.push(optimizations[0]);
+				for (var i = 1; i < optimizations.length; i++) {
+					let optDiff = diff.diffWordsWithSpace(optimizations[i - 1], optimizations[i]);
+					let optDiffHtml = '';
+					for (var j = 0; j < optDiff.length; j++) {
+						let part = optDiff[j];
+						if (part.added) {
+							optDiffHtml += `<span style='background-color: green; color: #fff;'>${part.value}</span>`;
+						} else if (part.removed) {
+							optDiffHtml += `<span style='background-color: red; color: #fff;'>${part.value}</span>`;
+						} else {
+							optDiffHtml += part.value;
+						}
 					}
+					diffedOptimizations.push(optDiffHtml)
 				}
-				diffedOptimizations.push(optDiffHtml)
-			}
 
-			// Create the main body HTML by concatenating the HTML for each optimization section
-			let bodyHtml = ``
-			for (var i = 0; i < optimizations.length; i++) {
-				bodyHtml += `
-				<div>
-					<h1>${i == 0 ? `Original Code` : `Optimization ${optimizationNames[i - 1]}`}</h1>
-					${i == 0 ? `` : `<button id='hide-${optimizationNames[i - 1]}' onclick="hideDiff('${optimizationNames[i - 1]}')">Hide Diff</button>`}
-					<div id='${optimizationNames[i - 1]}-diff'>
-						<pre>
-							<code class="plaintext">
-${diffedOptimizations[i]}
-							</code>
-						</pre>
-					</div>
-				`
-
-				// If this is not the original code section, create a section for the non-diffed
-				// optimization. This will be hidden by default
-				if (i !== 0) {
+				// Create the main body HTML by concatenating the HTML for each optimization section
+				let bodyHtml = ``
+				for (var i = 0; i < optimizations.length; i++) {
 					bodyHtml += `
-					<button style='display: none;' id='show-${optimizationNames[i - 1]}' onclick="showDiff('${optimizationNames[i - 1]}')">Show Diff</button>
-					<div style='display: none;' id='${optimizationNames[i - 1]}-original'>
-						<pre>
-							<code class="plaintext">
-${optimizations[i]}
-							</code>
-						</pre>					
+					<div>
+						<h1>${i == 0 ? `Original Code` : `Optimization ${optimizationNames[i - 1]}`}</h1>
+						${i == 0 ? `` : `<button id='hide-${optimizationNames[i - 1]}' onclick="hideDiff('${optimizationNames[i - 1]}')">Hide Diff</button>`}
+						<div id='${optimizationNames[i - 1]}-diff'>
+							<pre>
+								<code class="plaintext">
+	${diffedOptimizations[i]}
+								</code>
+							</pre>
+						</div>
+					`
+
+					// If this is not the original code section, create a section for the non-diffed
+					// optimization. This will be hidden by default
+					if (i !== 0) {
+						bodyHtml += `
+						<button style='display: none;' id='show-${optimizationNames[i - 1]}' onclick="showDiff('${optimizationNames[i - 1]}')">Show Diff</button>
+						<div style='display: none;' id='${optimizationNames[i - 1]}-original'>
+							<pre>
+								<code class="plaintext">
+	${optimizations[i]}
+								</code>
+							</pre>					
+						</div>
+						`
+					}
+
+					bodyHtml += `
 					</div>
 					`
 				}
 
-				bodyHtml += `
-				</div>
-				`
+				// Use the body HTML that we generated above to create the final HTML we put in the webview
+				let finalHtml = `
+	<!DOCTYPE html>
+	<html>
+		<head>
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="default-src 'none'; img-src ${panel.webview.cspSource} https:; script-src ${panel.webview.cspSource} https: 'unsafe-inline'; style-src ${panel.webview.cspSource} https: 'unsafe-inline';"
+		  />
+		</head>
+		${bodyHtml}
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/styles/codepen-embed.min.css">
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/highlight.min.js"></script>
+		<script>
+			hljs.initHighlightingOnLoad();
+			function hideDiff(name) {
+				document.getElementById("hide-" + name).style.display = 'none';
+				document.getElementById(name + "-diff").style.display = 'none';
+				document.getElementById("show-" + name).style.display = 'block';
+				document.getElementById(name + "-original").style.display = 'block';
 			}
+			function showDiff(name) {
+				document.getElementById("hide-" + name).style.display = 'block';
+				document.getElementById(name + "-diff").style.display = 'block';
+				document.getElementById("show-" + name).style.display = 'none';
+				document.getElementById(name + "-original").style.display = 'none';
+			}
+		</script>
+	</html>
+	`
+				panel.webview.html = finalHtml;
+			}).catch(err => {
+				// Display error in webview
+				panel.webview.html = `
+				<!DOCTYPE html>
+				<html>
+					<br>
+					<h4>Failed to perform optimizations on MLIR. Please note that this visualizer only works on TensorFlow MLIR.</h4>
 
-			// Use the body HTML that we generated above to create the final HTML we put in the webview
-			let finalHtml = `
-<!DOCTYPE html>
-<html>
-	<head>
-	<meta
-		http-equiv="Content-Security-Policy"
-		content="default-src 'none'; img-src ${panel.webview.cspSource} https:; script-src ${panel.webview.cspSource} https: 'unsafe-inline'; style-src ${panel.webview.cspSource} https: 'unsafe-inline';"
-  	/>
-	</head>
-	${bodyHtml}
-	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/styles/codepen-embed.min.css">
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/highlight.min.js"></script>
-	<script>
-		hljs.initHighlightingOnLoad();
-		function hideDiff(name) {
-			document.getElementById("hide-" + name).style.display = 'none';
-			document.getElementById(name + "-diff").style.display = 'none';
-			document.getElementById("show-" + name).style.display = 'block';
-			document.getElementById(name + "-original").style.display = 'block';
-		}
-		function showDiff(name) {
-			document.getElementById("hide-" + name).style.display = 'block';
-			document.getElementById(name + "-diff").style.display = 'block';
-			document.getElementById("show-" + name).style.display = 'none';
-			document.getElementById(name + "-original").style.display = 'none';
-		}
-	</script>
-</html>
-`
-			panel.webview.html = finalHtml;
+					<h4>Error returned by tf-opt:</h4>
+					<pre>
+						<code>
+${err}
+						</code>
+					</pre>
+				</html>
+				`
+			});
 		});
 	});
 
