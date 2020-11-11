@@ -1,10 +1,22 @@
 import axios from 'axios';
 import * as child_process from 'child_process';
+import * as diff from 'diff';
 import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as tmp from 'tmp';
 import * as vscode from 'vscode';
+
+// A list of all the optimizations we need to run
+let optimizationNames = [
+	"tf-switch-fold",
+	"tf-executor-graph-pruning",
+	"tf-executor-island-coarsening",
+	"tf-materialize-passthrough-op",
+	"canonicalize",
+	"tf-shape-inference",
+	"tf-optimize"
+];
 
 async function downloadVersion(context: vscode.ExtensionContext, version: any) {
 	return new Promise(async resolve => {
@@ -128,26 +140,15 @@ async function checkTfOpt(context: vscode.ExtensionContext): Promise<string> {
 
 async function runOptimizations(fileText: string, binaryPath: string): Promise<string[]> {
 	return new Promise(async (resolve) => {
-		// A list of all the optimizations we need to run
-		let optimizations = [
-			"tf-switch-fold",
-			"tf-executor-graph-pruning",
-			"tf-executor-island-coarsening",
-			"tf-materialize-passthrough-op",
-			"canonicalize",
-			"tf-shape-inference",
-			"tf-optimize"
-		];
-
 		// Run all the optimizations through tf-opt
 		let allOutput = [];
 		let currentOutput = fileText;
-		for (var i = 0; i < optimizations.length; i++) {
+		for (var i = 0; i < optimizationNames.length; i++) {
 			let file = tmp.fileSync();
 			fs.writeSync(file.fd, currentOutput);
 			fs.close(file.fd);
 			allOutput.push(currentOutput)
-			currentOutput = await runTfOpt(binaryPath, file.name, optimizations[i]);
+			currentOutput = await runTfOpt(binaryPath, file.name, optimizationNames[i]);
 			file.removeCallback();
 		}
 		allOutput.push(currentOutput);
@@ -207,17 +208,36 @@ export function activate(context: vscode.ExtensionContext) {
 				vscode.window.showErrorMessage("Could not get code from the active editor")
 				return
 			}
+
+			// Generate optimizations and diffs
 			let optimizations = await runOptimizations(fileText, binaryPath);
+			let diffedOptimizations = [];
+			diffedOptimizations.push(optimizations[0]);
+			for (var i = 1; i < optimizations.length; i++) {
+				let optDiff = diff.diffWordsWithSpace(optimizations[i - 1], optimizations[i]);
+				let optDiffHtml = '';
+				for (var j = 0; j < optDiff.length; j++) {
+					let part = optDiff[j];
+					if (part.added) {
+						optDiffHtml += `<span style='background-color: green'>${part.value}</span>`;
+					} else if (part.removed) {
+						optDiffHtml += `<span style='background-color: lightcoral'>${part.value}</span>`;
+					} else {
+						optDiffHtml += part.value;
+					}
+				}
+				diffedOptimizations.push(optDiffHtml)
+			}
 
 			let bodyHtml = ``
-			for(var i = 0; i < optimizations.length; i++) {
+			for (var i = 0; i < optimizations.length; i++) {
 				bodyHtml += `
 				<div>
-					<h1>Optimization ${i}</h1>
+					<h1>${i == 0 ? `Original Code` : `Optimization ${optimizationNames[i - 1]}`}</h1>
 					<div>
 						<pre>
 							<code class="plaintext">
-${optimizations[i]}
+${diffedOptimizations[i]}
 							</code>
 						</pre>
 					</div>
@@ -230,13 +250,15 @@ ${optimizations[i]}
 	<head>
 	<meta
 		http-equiv="Content-Security-Policy"
-		content="default-src 'none'; img-src ${panel.webview.cspSource} https:; script-src ${panel.webview.cspSource} https: 'unsafe-inline'; style-src ${panel.webview.cspSource} https:;"
+		content="default-src 'none'; img-src ${panel.webview.cspSource} https:; script-src ${panel.webview.cspSource} https: 'unsafe-inline'; style-src ${panel.webview.cspSource} https: 'unsafe-inline';"
   	/>
 	</head>
 	${bodyHtml}
 	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/styles/atom-one-dark.min.css">
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/highlight.min.js"></script>
-	<script>hljs.initHighlightingOnLoad();</script>
+	<script>
+		hljs.initHighlightingOnLoad();
+	</script>
 </html>
 `
 			panel.webview.html = finalHtml;
