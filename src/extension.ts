@@ -138,12 +138,22 @@ async function checkTfOpt(context: vscode.ExtensionContext): Promise<string> {
 	});
 }
 
-async function runOptimizations(fileText: string, binaryPath: string): Promise<string[]> {
+async function runOptimizations(fileText: string, binaryPath: string, webview: vscode.Webview): Promise<string[]> {
 	return new Promise(async (resolve) => {
 		// Run all the optimizations through tf-opt
 		let allOutput = [];
 		let currentOutput = fileText;
 		for (var i = 0; i < optimizationNames.length; i++) {
+			// Show that optimization is in progress
+			webview.html = `
+			<html>
+				<body>
+					<br>
+					Running optimization: ${optimizationNames[i]}...
+				</body>
+			</html>
+			`
+
 			let file = tmp.fileSync();
 			fs.writeSync(file.fd, currentOutput);
 			fs.close(file.fd);
@@ -184,24 +194,15 @@ export function activate(context: vscode.ExtensionContext) {
 
 		checkTfOpt(context).then(async (binaryPath: string) => {
 			const panel = vscode.window.createWebviewPanel(
-				'opt-visualizer', // Identifies the type of the webview. Used internally
-				'MLIR Visualizer', // Title of the panel displayed to the user
-				vscode.ViewColumn.Beside, // Editor column to show the new webview panel in.
+				'opt-visualizer',
+				// Cast is safe because we check if there is an active editor above
+				'Visualizer: ' + path.basename(<string>vscode.window.activeTextEditor?.document.fileName),
+				vscode.ViewColumn.Beside,
 				{
 					// Enable scripts in the webview
 					enableScripts: true
 				}
 			);
-
-			// Show that optimization is in progress
-			panel.webview.html = `
-			<html>
-				<body>
-					<br>
-					Optimization in progress...
-				</body>
-			</html>
-			`
 
 			let fileText: string | undefined = vscode.window.activeTextEditor?.document.getText();
 			if (!fileText) {
@@ -210,7 +211,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 
 			// Generate optimizations and diffs
-			let optimizations = await runOptimizations(fileText, binaryPath);
+			let optimizations = await runOptimizations(fileText, binaryPath, panel.webview);
 			let diffedOptimizations = [];
 			diffedOptimizations.push(optimizations[0]);
 			for (var i = 1; i < optimizations.length; i++) {
@@ -221,7 +222,7 @@ export function activate(context: vscode.ExtensionContext) {
 					if (part.added) {
 						optDiffHtml += `<span style='background-color: green'>${part.value}</span>`;
 					} else if (part.removed) {
-						optDiffHtml += `<span style='background-color: lightcoral'>${part.value}</span>`;
+						optDiffHtml += `<span style='background-color: red'>${part.value}</span>`;
 					} else {
 						optDiffHtml += part.value;
 					}
@@ -254,7 +255,7 @@ ${diffedOptimizations[i]}
   	/>
 	</head>
 	${bodyHtml}
-	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/styles/atom-one-dark.min.css">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/styles/codepen-embed.min.css">
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.3.2/highlight.min.js"></script>
 	<script>
 		hljs.initHighlightingOnLoad();
