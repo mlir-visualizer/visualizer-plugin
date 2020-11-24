@@ -150,14 +150,27 @@ async function runOptimizations(fileText: string, binaryPath: string, webview: v
 		let currentOutput = fileText;
 		for (var i = 0; i < optimizationNames.length; i++) {
 			// Show that optimization is in progress
+			var optimizationHtml = ``;
+			if (i != 0) {
+				for ( var j = 0; j < i; j++) {
+					optimizationHtml += `<s>${optimizationNames[j]}</s> <b>Complete</b><br>`
+				}
+			}
 			webview.html = `
 			<html>
 				<body>
 					<br>
-					Running optimization: ${optimizationNames[i]}...
+					<b>Running optimizations:</b><br>${optimizationHtml}${optimizationNames[i]}<span id="dots"></span>
 				</body>
+				<script>
+					function addDot() {
+						document.getElementById("dots").innerText += '.';
+					}
+					setInterval(addDot, 1000);
+					addDot();
+				</script>
 			</html>
-			`
+			`;
 
 			// Create a temporary file and write the output of the previous
 			// optimization stage to it
@@ -172,7 +185,7 @@ async function runOptimizations(fileText: string, binaryPath: string, webview: v
 			try {
 				// Run the next optimization on that file
 				currentOutput = await runTfOpt(binaryPath, file.name, optimizationNames[i]);
-
+				
 				// Delete the temporary file
 				file.removeCallback();
 			} catch (err) {
@@ -259,11 +272,18 @@ export function activate(context: vscode.ExtensionContext) {
 					diffedOptimizations.push(optDiffHtml)
 				}
 
+				// Create HTML for the header to jump to an optimization
+				let jumpToHtml = `<b>Jump to:</b> <button onclick='jump("undefined");'>Original Code</button> `;
+				for (var i = 0; i < optimizationNames.length; i++) {
+					jumpToHtml += `<button onclick='jump("${optimizationNames[i]}");'>${optimizationNames[i]}</button> `
+				}
+
 				// Create the main body HTML by concatenating the HTML for each optimization section
 				let bodyHtml = ``
 				for (var i = 0; i < optimizations.length; i++) {
 					bodyHtml += `
-					<div>
+					<div id='${optimizationNames[i - 1]}'>
+						${i == 0 ? jumpToHtml + "<br>" : ``}
 						<h1>${i == 0 ? `Original Code` : `Optimization ${i}: ${optimizationNames[i - 1]}`}</h1>
 						${i == 0 ? `` : `<button id='hide-${optimizationNames[i - 1]}' onclick="hideDiff('${optimizationNames[i - 1]}')">Hide Diff</button>`}
 						<div id='${optimizationNames[i - 1]}-diff'>
@@ -345,6 +365,10 @@ ${optimizations[i]}
 				document.getElementById(name + "-diff").style.display = 'block';
 				document.getElementById("show-" + name).style.display = 'none';
 				document.getElementById(name + "-original").style.display = 'none';
+			}
+			function jump(name) {
+				var top = document.getElementById(name).offsetTop;
+    			window.scrollTo(0, top);     
 			}
 		</script>
 	</html>
