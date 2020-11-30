@@ -27,14 +27,16 @@ async function downloadVersion(context: vscode.ExtensionContext, version: any) {
 		let downloads: string[] = [];
 		switch (system) {
 			case "Darwin": {
-				// TODO: Support Darwin tf-opt
+				downloads.push('tf-opt-macos')
+				break
 			}
 			case "Linux": {
 				downloads.push('tf-opt-linux')
 				break
 			}
 			case "Windows_NT": {
-				// TODO: Support Windows tf-opt
+				downloads.push('tf-opt.exe')
+				break
 			}
 		}
 
@@ -105,15 +107,35 @@ async function getLatestVersion() {
 	});
 }
 
-// Check if the tf-opt tool is already downloaded
+// Check if the tf-opt tool is already downloaded. Returns tf-opt path
 async function checkTfOpt(context: vscode.ExtensionContext): Promise<string> {
 	return new Promise(async (resolve) => {
 		// Get current version information from the global state
 		let currentVersion: number | undefined = context.globalState.get("tfopt-version");
 		let currentVersionDate = new Date(<number>currentVersion);
 
-		// TODO: Set the binary path based on operating system
-		let binaryPath = path.join(context.globalStorageUri.fsPath, "tf-opt-linux");
+		// If the tf-opt binary path is configured, we don't need to check for updates
+		let tfOptConfiguration: string|null|undefined = vscode.workspace.getConfiguration('mlir-visualizer').get('tfOptPath');
+		if (tfOptConfiguration != null && tfOptConfiguration != undefined) {
+			console.log(`Using configured tf-opt path: ${tfOptConfiguration}`)
+			return resolve(tfOptConfiguration);
+		}
+
+		let binaryPath: string = context.globalStorageUri.fsPath;
+		switch (os.type()) {
+			case "Darwin": {
+				binaryPath = path.join(binaryPath, "tf-opt-macos")
+				break
+			}
+			case "Linux": {
+				binaryPath = path.join(binaryPath, "tf-opt-linux")
+				break
+			}
+			case "Windows_NT": {
+				binaryPath = path.join(binaryPath, "tf-opt.exe")
+				break
+			}
+		}
 
 		let latestVersion: any = await getLatestVersion();
 		// If we failed to get the latest version, just return silently

@@ -1,7 +1,7 @@
 {
 	"name": "mlir-visualizer",
 	"displayName": "mlir-visualizer",
-	"description": "A visualizer for MLIR compiler optimizations",
+	"description": "A visualizer for TensorFlow MLIR compiler optimizations",
 	"publisher": "MomenAbdelkarim-WyattCalandro-LuisPrieto",
 	"repository": {
 		"url": "https://github.com/mlir-visualizer/visualizer-plugin",
@@ -24,7 +24,17 @@
 				"command": "mlir-visualizer.visualize",
 				"title": "Visualize MLIR Optimizations"
 			}
-		]
+		],
+		"configuration": {
+			"title": "MLIR Optimizations Visualizer",
+			"properties": {
+			  "mlir-visualizer.tfOptPath": {
+				"type": ["string", "null"],
+				"default": null,
+				"description": "Optional path to custom tf-opt binary"
+			  }
+			}
+		  }
 	},
 	"scripts": {
 		"vscode:prepublish": "yarn run compile",
