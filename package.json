@@ -1,6 +1,6 @@
 {
 	"name": "mlir-visualizer",
-	"displayName": "mlir-visualizer",
+	"displayName": "MLIR Optimizations Visualizer",
 	"description": "A visualizer for TensorFlow MLIR compiler optimizations",
 	"publisher": "MomenAbdelkarim-WyattCalandro-LuisPrieto",
 	"repository": {
